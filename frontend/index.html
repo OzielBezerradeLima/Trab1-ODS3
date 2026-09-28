@@ -42,6 +42,8 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
     <h2>Conexão</h2>
     <label for="rpc">Nó da blockchain (RPC)</label>
     <input id="rpc" value="http://127.0.0.1:8545">
+    <label for="registry">Contrato de documentos</label>
+    <select id="registry" disabled></select>
     <label for="acct">Conta ativa</label>
     <select id="acct"></select>
     <div id="role" class="msg"></div>
@@ -104,15 +106,57 @@ async function hashFile(input) {
 }
 
 async function connect() {
+  contract = null;
+  signers = [];
+  $("registry").disabled = true;
+  $("registry").innerHTML = "";
+  $("acct").innerHTML = "";
+  for (const id of ["state", "chain", "role", "outReg", "outVer", "outAuth"]) $(id).textContent = "";
+  if (provider) provider.destroy();
   try {
-    cfg = await (await fetch("contract.json")).json();
+    const response = await fetch("contract.json", { cache: "no-store" });
+    if (!response.ok) throw new Error("Configuração do contrato não encontrada. Rode o deploy para esta rede.");
+    cfg = await response.json();
     provider = new ethers.JsonRpcProvider($("rpc").value);
+    const network = await provider.getNetwork();
+    if (cfg.chainId != null && String(cfg.chainId) !== network.chainId.toString()) {
+      throw new Error("O RPC pertence a outra rede. Use o RPC correto ou rode o deploy para essa rede.");
+    }
+    const deployments = cfg.deployments || [{ address: cfg.address }];
+    for (const deployment of deployments) {
+      const option = document.createElement("option");
+      option.value = deployment.address;
+      option.textContent = `${deployment.address === cfg.address ? "Atual" : "Anterior"} – ${short(deployment.address)}${deployment.blockNumber != null ? " (bloco " + deployment.blockNumber + ")" : ""}`;
+      $("registry").appendChild(option);
+    }
+    $("registry").value = cfg.address;
     signers = await provider.listAccounts();
+    if (!signers.length) throw new Error("O RPC não disponibilizou contas para esta aplicação local.");
     $("acct").innerHTML = signers.map((s, i) => `<option>Conta ${i} – ${s.address}</option>`).join("");
-    contract = new ethers.Contract(cfg.address, cfg.abi, provider);
-    show("conn", "Conectado. Contrato em " + cfg.address);
+    $("registry").disabled = false;
+    await selectRegistry();
+  } catch (e) {
+    contract = null;
+    show("conn", "Falha ao conectar: " + errText(e), false);
+  }
+}
+
+async function selectRegistry() {
+  contract = null;
+  for (const id of ["state", "role", "outReg", "outVer", "outAuth"]) $(id).textContent = "";
+  try {
+    const address = $("registry").value;
+    if (await provider.getCode(address) === "0x") {
+      throw new Error("Contrato não encontrado nesta blockchain. Se o nó foi reiniciado, rode o deploy e conecte novamente.");
+    }
+    contract = new ethers.Contract(address, cfg.abi, provider);
     await refresh();
-  } catch (e) { show("conn", "Falha ao conectar. Rode 'npm run node' e 'npm run deploy'. " + errText(e), false); }
+    show("conn", "Conectado. Consultas e operações usam o contrato " + address);
+  } catch (e) {
+    contract = null;
+    for (const id of ["state", "chain", "role"]) $(id).textContent = "";
+    show("conn", "Falha ao selecionar contrato: " + errText(e), false);
+  }
 }
 
 async function send(outId, fn, okMsg) {
@@ -129,7 +173,7 @@ async function refresh() {
   const addr = signer().address;
   const [own, total, reg] = await Promise.all([contract.owner(), contract.totalDocuments(), contract.isRegistrar(addr)]);
   show("role", addr === own ? "Perfil: administrador (registra e autoriza)" : reg ? "Perfil: registrador autorizado" : "Perfil: sem permissão de registro", true);
-  $("state").innerHTML = `Endereço: ${cfg.address}<br>Administrador: ${own}<br>Documentos registrados: ${total}`;
+  $("state").innerHTML = `Endereço: ${await contract.getAddress()}<br>Administrador: ${own}<br>Documentos registrados: ${total}`;
   await drawChain();
 }
 
@@ -153,6 +197,7 @@ async function drawChain() {
 
 $("acct").onchange = () => contract && refresh();
 $("btnConnect").onclick = connect;
+$("registry").onchange = selectRegistry;
 
 $("btnReg").onclick = async () => {
   try {
@@ -168,7 +213,7 @@ $("btnVer").onclick = async () => {
     const s = STATUS[Number(d.status)];
     $("outVer").className = "msg " + (s === "Valido" ? "ok" : "err");
     $("outVer").innerHTML = s === "Inexistente"
-      ? `<span class="tag ${s}">Não registrado</span> Este arquivo não consta na blockchain (ou foi alterado).`
+      ? `<span class="tag ${s}">Não registrado</span> Este arquivo não consta no contrato selecionado (ou foi alterado). Se foi registrado antes de outro deploy, selecione o contrato anterior em Conexão.`
       : `<span class="tag ${s}">${s}</span> “${d.title}”<br>Registrado por ${d.registrant}<br>em ${fmt(d.timestamp)}`;
   } catch (e) { show("outVer", errText(e), false); }
 };

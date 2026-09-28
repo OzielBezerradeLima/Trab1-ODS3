@@ -40,10 +40,17 @@ Blockchain local (Hardhat node ou Ganache) ── contrato DocumentRegistry.sol
 npm install
 npm test                 # testes automatizados
 npm run node             # terminal 1: blockchain local (porta 8545)
-npm run deploy           # terminal 2: implanta e gera frontend/contract.json
+npm run deploy           # terminal 2: reutiliza o contrato ou implanta se ainda nao existir
 npm run web              # terminal 2: interface em http://localhost:3000
 ```
 Usando **Ganache** (porta 7545): abra o Ganache, rode `npm run deploy:ganache` e coloque `http://127.0.0.1:7545` no campo RPC da interface.
+
+### Deploy e documentos anteriores
+Rodar `npm run deploy` novamente na mesma blockchain reutiliza o contrato existente e preserva documentos, revogações e permissões. O comando atualiza `frontend/contract.json` com o endereço, a ABI, a rede e os contratos compatíveis encontrados nos blocos. Se o arquivo estiver ausente, o contrato mais antigo encontrado será usado como padrão. Um contrato novo só será criado se nenhum compatível existir na rede.
+
+A versão anterior do script criava um contrato vazio a cada deploy. Os documentos anteriores continuam nos contratos antigos enquanto a blockchain estiver disponível. Para acessá-los, rode `npm run deploy`, abra a interface e clique em **Conectar**. Em **Contrato de documentos**, escolha o endereço anterior: o contador, as consultas, as permissões e as operações passam a usar esse contrato. Os registros de contratos diferentes permanecem separados; a visualização dos blocos mostra a blockchain inteira.
+
+O Hardhat node guarda a blockchain em memória. Encerrar e iniciar `npm run node` apaga essa rede local, incluindo os documentos; reutilizar o contrato não recupera uma blockchain apagada. Mantenha o processo aberto durante a demonstração. Para conservar dados entre reinícios, use o Ganache com um workspace persistente e reabra o mesmo workspace.
 
 ## Roteiro da demonstração (4 min)
 1. Mostrar o nó rodando com as contas e o bloco gênesis.

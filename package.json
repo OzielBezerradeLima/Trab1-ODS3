@@ -1,0 +1,15 @@
+{
+  "name": "doc-registry",
+  "version": "1.0.0",
+  "scripts": {
+    "node": "hardhat node",
+    "test": "hardhat test",
+    "deploy": "hardhat run scripts/deploy.js --network localhost",
+    "deploy:ganache": "hardhat run scripts/deploy.js --network ganache",
+    "web": "npx serve frontend -l 3000"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.0"
+  }
+}

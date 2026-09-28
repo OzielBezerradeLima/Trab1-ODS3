@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cartório Digital – Registro de Documentos</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<style>
+:root{--bg:#eef2f4;--ink:#17232d;--mut:#5b6b77;--card:#fff;--line:#d3dce2;--acc:#0e6660;--ok:#1d7a3e;--err:#b3261e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Georgia,'Times New Roman',serif}
+header{padding:20px 24px;border-bottom:2px solid var(--acc);background:var(--card)}
+h1{margin:0;font-size:22px} h2{margin:0 0 10px;font-size:17px}
+header p{margin:2px 0 0;color:var(--mut);font-family:system-ui,sans-serif;font-size:13px}
+main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;padding:16px 24px;max-width:1200px;margin:auto}
+@media(max-width:860px){main{grid-template-columns:1fr}}
+section{background:var(--card);border:1px solid var(--line);padding:16px;margin-bottom:16px}
+label{display:block;font:600 13px system-ui,sans-serif;margin:10px 0 3px}
+input,select,button{font:14px system-ui,sans-serif;width:100%;padding:8px;border:1px solid var(--line);background:#fff}
+button{background:var(--acc);color:#fff;border:0;cursor:pointer;margin-top:10px;font-weight:600}
+button.sec{background:#fff;color:var(--acc);border:1px solid var(--acc)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #f0b429}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.msg{margin-top:10px;padding:8px 10px;font:13px system-ui,sans-serif;word-break:break-word;border-left:4px solid var(--line);background:#f7f9fa;min-height:20px}
+.msg.ok{border-color:var(--ok)}.msg.err{border-color:var(--err);color:var(--err)}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all}
+.block{border:1px solid var(--line);padding:10px;margin-bottom:8px;font-family:system-ui,sans-serif;font-size:13px}
+.block b{font-family:Georgia,serif;font-size:15px}
+.tx{margin-top:6px;padding-left:8px;border-left:3px solid var(--acc)}
+.tag{display:inline-block;padding:1px 8px;font:600 12px system-ui,sans-serif;color:#fff}
+.Valido{background:var(--ok)}.Revogado{background:var(--err)}.Inexistente{background:var(--mut)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Cartório Digital</h1>
+  <p>Registro e verificação de documentos por impressão digital (hash) em blockchain local</p>
+</header>
+<main>
+<div>
+  <section>
+    <h2>Conexão</h2>
+    <label for="rpc">Nó da blockchain (RPC)</label>
+    <input id="rpc" value="http://127.0.0.1:8545">
+    <label for="acct">Conta ativa</label>
+    <select id="acct"></select>
+    <div id="role" class="msg"></div>
+    <button id="btnConnect">Conectar</button>
+    <div id="conn" class="msg"></div>
+  </section>
+  <section>
+    <h2>Registrar documento</h2>
+    <label for="fileReg">Arquivo (só o hash sai do navegador)</label>
+    <input type="file" id="fileReg">
+    <label for="title">Título</label>
+    <input id="title" placeholder="Ex.: Diploma de Maria Silva">
+    <button id="btnReg">Registrar na blockchain</button>
+    <div id="outReg" class="msg"></div>
+  </section>
+  <section>
+    <h2>Verificar documento</h2>
+    <label for="fileVer">Arquivo a conferir</label>
+    <input type="file" id="fileVer">
+    <button id="btnVer">Consultar</button>
+    <button id="btnRev" class="sec">Revogar este documento</button>
+    <div id="outVer" class="msg"></div>
+  </section>
+  <section>
+    <h2>Registradores autorizados (administrador)</h2>
+    <label for="addr">Endereço da conta</label>
+    <input id="addr" placeholder="0x...">
+    <div class="row">
+      <button id="btnAuth">Autorizar</button>
+      <button id="btnRm" class="sec">Remover</button>
+    </div>
+    <div id="outAuth" class="msg"></div>
+  </section>
+</div>
+<div>
+  <section>
+    <h2>Estado do contrato</h2>
+    <div id="state" class="mono"></div>
+  </section>
+  <section>
+    <h2>Blockchain (últimos blocos)</h2>
+    <div id="chain"></div>
+  </section>
+</div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const STATUS = ["Inexistente", "Valido", "Revogado"];
+let provider, contract, cfg, signers = [];
+
+const show = (id, text, ok = true) => { $(id).textContent = text; $(id).className = "msg " + (ok ? "ok" : "err"); };
+const errText = (e) => e.reason || (e.revert && e.revert.args && e.revert.args[0]) || e.shortMessage || e.message;
+const short = (h) => h.slice(0, 10) + "…" + h.slice(-6);
+const fmt = (ts) => new Date(Number(ts) * 1000).toLocaleString("pt-BR");
+const signer = () => signers[$("acct").selectedIndex];
+
+async function hashFile(input) {
+  if (!input.files[0]) throw new Error("Selecione um arquivo.");
+  return ethers.sha256(new Uint8Array(await input.files[0].arrayBuffer()));
+}
+
+async function connect() {
+  try {
+    cfg = await (await fetch("contract.json")).json();
+    provider = new ethers.JsonRpcProvider($("rpc").value);
+    signers = await provider.listAccounts();
+    $("acct").innerHTML = signers.map((s, i) => `<option>Conta ${i} – ${s.address}</option>`).join("");
+    contract = new ethers.Contract(cfg.address, cfg.abi, provider);
+    show("conn", "Conectado. Contrato em " + cfg.address);
+    await refresh();
+  } catch (e) { show("conn", "Falha ao conectar. Rode 'npm run node' e 'npm run deploy'. " + errText(e), false); }
+}
+
+async function send(outId, fn, okMsg) {
+  try {
+    const tx = await fn(contract.connect(signer()));
+    show(outId, "Transação enviada, aguardando confirmação…");
+    const r = await tx.wait();
+    show(outId, `${okMsg} (bloco ${r.blockNumber}, tx ${short(tx.hash)})`);
+    await refresh();
+  } catch (e) { show(outId, "Operação rejeitada: " + errText(e), false); }
+}
+
+async function refresh() {
+  const addr = signer().address;
+  const [own, total, reg] = await Promise.all([contract.owner(), contract.totalDocuments(), contract.isRegistrar(addr)]);
+  show("role", addr === own ? "Perfil: administrador (registra e autoriza)" : reg ? "Perfil: registrador autorizado" : "Perfil: sem permissão de registro", true);
+  $("state").innerHTML = `Endereço: ${cfg.address}<br>Administrador: ${own}<br>Documentos registrados: ${total}`;
+  await drawChain();
+}
+
+async function drawChain() {
+  const last = await provider.getBlockNumber();
+  let html = "";
+  for (let n = last; n >= Math.max(0, last - 9); n--) {
+    const b = await provider.getBlock(n, true);
+    html += `<div class="block"><b>Bloco #${n}</b> — ${fmt(b.timestamp)}<br>
+      hash: <span class="mono">${short(b.hash)}</span><br>
+      hash anterior: <span class="mono">${b.parentHash === ethers.ZeroHash ? "(gênesis)" : short(b.parentHash)}</span>`;
+    for (const tx of b.prefetchedTransactions) {
+      let name = "implantação do contrato";
+      try { const p = tx.to && contract.interface.parseTransaction({ data: tx.data }); if (p) name = p.name; } catch {}
+      html += `<div class="tx">${name}<br><span class="mono">de ${short(tx.from)}</span></div>`;
+    }
+    html += "</div>";
+  }
+  $("chain").innerHTML = html;
+}
+
+$("acct").onchange = () => contract && refresh();
+$("btnConnect").onclick = connect;
+
+$("btnReg").onclick = async () => {
+  try {
+    const h = await hashFile($("fileReg"));
+    await send("outReg", (c) => c.registerDocument(h, $("title").value), "Documento registrado. Hash " + short(h));
+  } catch (e) { show("outReg", errText(e), false); }
+};
+
+$("btnVer").onclick = async () => {
+  try {
+    const h = await hashFile($("fileVer"));
+    const d = await contract.getDocument(h);
+    const s = STATUS[Number(d.status)];
+    $("outVer").className = "msg " + (s === "Valido" ? "ok" : "err");
+    $("outVer").innerHTML = s === "Inexistente"
+      ? `<span class="tag ${s}">Não registrado</span> Este arquivo não consta na blockchain (ou foi alterado).`
+      : `<span class="tag ${s}">${s}</span> “${d.title}”<br>Registrado por ${d.registrant}<br>em ${fmt(d.timestamp)}`;
+  } catch (e) { show("outVer", errText(e), false); }
+};
+
+$("btnRev").onclick = async () => {
+  try {
+    const h = await hashFile($("fileVer"));
+    await send("outVer", (c) => c.revokeDocument(h), "Documento revogado");
+  } catch (e) { show("outVer", errText(e), false); }
+};
+
+$("btnAuth").onclick = () => send("outAuth", (c) => c.authorizeRegistrar($("addr").value), "Registrador autorizado");
+$("btnRm").onclick = () => send("outAuth", (c) => c.removeRegistrar($("addr").value), "Registrador removido");
+</script>
+</body>
+</html>

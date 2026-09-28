@@ -1,21 +1,66 @@
-# Sistema de Registro de Identidades e Documentos em Blockchain
+# Cartório Digital – Registro de Documentos em Blockchain
 
-Este repositório contém a implementação de uma Blockchain local simulada em Python, acompanhada de uma interface visual construída com Streamlit. O objetivo principal do projeto é demonstrar o registro e a verificação de documentos garantindo a imutabilidade por meio de tecnologia de blocos e criptografia de hash (SHA-256).
+## Problema
+Documentos digitais (diplomas, contratos, laudos) podem ser copiados, alterados e falsificados, e verificar a autenticidade depende de um intermediário. Como provar que um arquivo existia em determinada data, foi emitido por quem tinha autoridade e não foi adulterado?
 
-## Funcionalidades
-1. **Registrar Documentos:** Insere um novo documento na rede (gerando o Hash) e vincula a um usuário. Possui um Smart Contract que impede campos nulos e registros duplicados.
-2. **Verificar Autenticidade:** Compara o conteúdo de um documento com a base registrada na Blockchain. Qualquer mínima alteração (uma vírgula a mais) resulta em reprovação da verificação.
-3. **Explorar Blockchain:** Exibe na interface o Ledger local e aberto, detalhando transações, Hashes de blocos anteriores, blocos atuais e timestamps.
+## Por que Blockchain
+- **Imutabilidade:** um registro não pode ser editado nem apagado sem deixar rastro.
+- **Prova de data e autoria:** timestamp do bloco e endereço de quem registrou.
+- **Verificação sem confiar em um único servidor:** qualquer pessoa consulta o contrato.
+- **Regras auditáveis:** o contrato inteligente impõe quem pode registrar/revogar.
 
-## Como executar localmente
+## O que fica na blockchain (e o que não fica)
+| Na blockchain | Fora da blockchain |
+|---|---|
+| Hash SHA-256 do arquivo | O arquivo em si |
+| Título, endereço do registrador, data | Dados pessoais / conteúdo do documento |
+| Status (Válido / Revogado) | |
+| Lista de registradores autorizados | |
 
-1. Tenha o Python instalado na sua máquina.
-2. Instale o framework de interface de usuário (Streamlit) utilizando o pip:
-   ```bash
-   pip install streamlit
-   ```
-3. No terminal, dentro da pasta dos arquivos, execute a aplicação com o comando:
-   ```bash
-   streamlit run app.py
-   ```
-4. O terminal fornecerá uma URL local (normalmente `http://localhost:8501`). O seu navegador abrirá a interface automaticamente.
+Guardar apenas o hash preserva a privacidade (LGPD) e evita custo de armazenar arquivos. Se um único byte do arquivo mudar, o hash muda e a verificação falha.
+
+## Arquitetura
+```
+Navegador (frontend/index.html + ethers.js)
+   │  calcula SHA-256 do arquivo localmente
+   ▼  JSON-RPC
+Blockchain local (Hardhat node ou Ganache) ── contrato DocumentRegistry.sol
+```
+
+## Contrato inteligente – regras de negócio
+- Apenas **registradores autorizados** registram documentos.
+- Apenas o **administrador** (quem implantou) autoriza/remove registradores.
+- **Hash duplicado, hash zero e título vazio são rejeitados.**
+- Só o **registrador original ou o administrador** revoga; revogar duas vezes é rejeitado.
+- Consulta (`getDocument`) é gratuita e retorna status Inexistente / Válido / Revogado.
+- Eventos: `DocumentRegistered`, `DocumentRevoked`, `RegistrarAuthorized`, `RegistrarRemoved`.
+
+## Como executar
+```bash
+npm install
+npm test                 # testes automatizados
+npm run node             # terminal 1: blockchain local (porta 8545)
+npm run deploy           # terminal 2: implanta e gera frontend/contract.json
+npm run web              # terminal 2: interface em http://localhost:3000
+```
+Usando **Ganache** (porta 7545): abra o Ganache, rode `npm run deploy:ganache` e coloque `http://127.0.0.1:7545` no campo RPC da interface.
+
+## Roteiro da demonstração (4 min)
+1. Mostrar o nó rodando com as contas e o bloco gênesis.
+2. Conta 0 (administrador): registrar um PDF → mostrar confirmação e o novo bloco.
+3. Verificar o mesmo PDF → status **Válido**, autor e data; contador de documentos aumentou.
+4. Verificar o PDF **alterado** (ou outro arquivo) → **Não registrado**.
+5. Trocar para Conta 1 (sem permissão) e tentar registrar → **rejeitado**.
+6. Autorizar a Conta 1 com a Conta 0 e repetir o registro → aceito. Revogar → status **Revogado**.
+
+## Testes
+| Caso | Resultado esperado |
+|---|---|
+| Registro válido | Aceito, dados gravados, evento emitido |
+| Hash duplicado | Rejeitado |
+| Título vazio / hash zero | Rejeitado |
+| Conta sem permissão registra | Rejeitado |
+| Não-admin autoriza registrador | Rejeitado |
+| Terceiro revoga documento | Rejeitado |
+| Revogar duas vezes | Rejeitado |
+| Consultar hash inexistente | Status 0 (não registrado) |
